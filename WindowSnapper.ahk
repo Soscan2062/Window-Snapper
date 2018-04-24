@@ -1,0 +1,191 @@
+﻿;Version 1.0
+#NoEnv  ; Recommended for performance and compatibility with future AutoHotkey releases.
+; #Warn  ; Enable warnings to assist with detecting common errors.
+;~ #NoTrayIcon
+#Persistent
+SendMode Input  ; Recommended for new scripts due to its superior speed and reliability.
+SetWorkingDir %A_ScriptDir%  ; Ensures a consistent starting directory.
+CoordMode, Mouse, Screen
+CoordMode, Pixel, Window
+#SingleInstance Force
+;~ SetTitleMatchMode 2
+SetTitleMatchMode RegEx
+DetectHiddenWindows Off
+#WinActivateForce
+SetControlDelay 1
+SetWinDelay 0
+SetKeyDelay 50, 5
+;SetMouseDelay -1
+;SetBatchLines -1
+StringCaseSense Off 
+;~ #Include Gdip_All.ahk
+
+;~ Sleep, 1000
+;~ x := WinExist("A")
+;~ WinMove, ahk_id %x% 10,10,200,200
+;~ ExitApp
+
+;initialize global varriables
+wh := Object() ;wh = array of all window hwnd, location corresponds to c starting at 1
+;~ sxO := "" ;original xy positions
+;~ syO := ""
+edgeX := "" ;edges of current active window
+edgeY := ""
+winA := "" ;used as index in hw of active window
+return
+
+LButton::
+Click, Down
+Sleep, 50
+
+;array of all hwnds and whether they were minimized or not
+;the list is longer but it (hopefully) only get actual windows
+winA := WinExist("A") ;active window
+WinGet windows, List,,,^$
+Loop %windows%
+{
+    id := windows%A_Index%
+    WinGetTitle wt, ahk_id %id% ;wt = window title
+    if instr(s, "0x94000") ;this style seems to identify if the window actually exists
+        continue ;skip, doesn't exist
+    
+    ;check for maximize or minimized
+    WinGet, winState, MinMax, ahk_id %id%
+    if (winState = -1) ;-1 is minimized, skip the window if it is
+        continue
+
+    if (id=winA AND winA>50) { ;if its the active window winA becomes index of wh with current window
+        winState := 2 ;2 indicates active current window
+        winA := A_Index
+    }
+    wh[A_Index,0] := id
+    wh[A_Index,1] := winState
+    WinGetPos, xw, yw, ww, hw, ahk_id %id%
+    wh[A_Index,2] := xw ;left edge location
+    wh[A_Index,3] := yw ;top edge location
+    wh[A_Index,4] := xw+ww ;right edge location
+    wh[A_Index,5] := yw+hw ;bottom edge location
+}
+
+;determine working edge of window, repeat for x and y
+MouseGetPos, cx, cy ;get current mouse pos
+if (cx < (wh[winA,2]+10) AND cx > (wh[winA,2]-10))
+    edgeX := "L"
+else if (cx < (wh[winA,4]+10) AND cx > (wh[winA,4]-10))
+    edgeX := "R"
+else
+    edgeX := "NA"
+
+if (cy < (wh[winA,3]+10) AND cy > (wh[winA,3]-10))
+    edgeY := "T"
+else if (cy < (wh[winA,5]+10) AND cy > (wh[winA,5]-10))
+    edgeY := "B"
+else
+    edgeY := "NA"
+
+SetTimer, check, 50
+return
+
+check:
+if (!GetKeyState("LButton", "P")) { ;see if mouse is still press down, cancel if it is not
+    SetTimer, check, off
+    Click, Up
+    return
+}
+
+;check edgeX/Y to neighboring windows, skip if  current edge
+MouseGetPos, cx, cy ;get current mouse pos
+;X left
+if (edgeX="L") {
+    id := wh[winA,0]
+    cw := wh[winA,4]-cx
+    WinMove, ahk_id %id%,,%cx%,,%cw%
+    Loop % wh.MaxIndex()
+    {
+        if (A_Index=winA) ;skip current window
+            continue
+        if (wh[A_Index, 4] < (cx+20) AND wh[A_Index, 4] > (cx-20)) { ;check of window edge is bumping mine
+            if (wh[A_Index,1] = 1) { ;check if it is maximized, maximized cancels my movement
+                cx := wh[A_Index,4]-8 ;move back to right edge of maximized window
+                MouseMove, %cx%, %cy% ;move to right edge of maximized
+                id := wh[winA,0]
+                cw := wh[winA,4]-cx
+                WinMove, ahk_id %id%,,%cx%,,%cw% ;align window with right edge of maxmized
+            } else { ;not maximized, move second window as needed
+                id := wh[A_Index,0]
+                cw := cx-wh[A_Index,2]
+                WinMove, ahk_id %id%,,,,%cw% ;move second to match current
+                wh[A_Index,4] := wh[A_Index,2] + cw
+            }
+        }
+    }
+}
+
+;X right
+if (edgeX="R") {
+    id := wh[winA,0]
+    cw := cx-wh[winA,2]
+    WinMove, ahk_id %id%,,%tx%,,%cw%
+    Loop % wh.MaxIndex()
+    {
+        if (A_Index=winA) ;skip current window
+            continue
+        if (wh[A_Index, 2] < (cx+20) AND wh[A_Index, 2] > (cx-20)) { ;check of window edge is bumping mine
+            if (wh[A_Index, 1] = 1) { ;check if it is maximized, maximized cancels my movement
+                cx := wh[A_Index,2]+8 ;move back to left edge of maximized window
+                MouseMove, %cx%, %cy% ;move to right edge of maximized
+                id := wh[winA,0]
+                cw := cx -wh[winA,2]
+                WinMove, ahk_id %id%,,,,%cw% ;align window with left edge of maxmized
+            } else { ;not maximized, move second window as needed
+                id := wh[A_Index,0]
+                cw := wh[A_Index,4]-cx
+                WinMove, ahk_id %id%,,%cx%,,%cw% ;move second to match current
+                wh[A_Index,2] := cx
+                wh[A_Index,4] := cx + cw
+            }
+        }
+    }
+}
+
+;Y values aren't concerned with maximized unless monitors are stacked on top of each other
+;Y top
+if (edgeY="T") {
+    id := wh[winA,0]
+    ch := wh[winA,5]-cy
+    WinMove, ahk_id %id%,,,%cy%,,%ch%
+    Loop % wh.MaxIndex()
+    {
+        if (A_Index=winA) ;skip current window
+            continue
+        if (wh[A_Index, 5] < (cy+20) AND wh[A_Index, 5] > (cy-20)) { ;check of window edge is bumping mine
+            id := wh[A_Index,0]
+            ch := cy-wh[A_Index,3]
+            WinMove, ahk_id %id%,,,,,%ch% ;move second to match current
+            wh[A_Index,5] := wh[A_Index,3]+ch
+        }
+    }
+}
+
+;Y bottom
+if (edgeY="B") {
+    id := wh[winA,0]
+    ch :=  cy-wh[winA,3]
+    WinMove, ahk_id %id%,,,,,%ch%
+    Loop % wh.MaxIndex()
+    {
+        if (A_Index=winA) ;skip current window
+            continue
+        if (wh[A_Index, 3] < (cy+20) AND wh[A_Index, 3] > (cy-20)) { ;check of window edge is bumping mine
+            id := wh[A_Index,0]
+            ch := wh[A_Index,5]-cy
+            WinMove, ahk_id %id%,,,%cy%,,%ch% ;move second to match current
+            wh[A_Index,3] := cy
+            wh[A_Index,5] := cy+ch
+        }
+    }
+}
+return
+
+^Esc::ExitApp
+
